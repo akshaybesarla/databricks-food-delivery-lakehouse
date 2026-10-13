@@ -1,0 +1,25 @@
+# Databricks Asset Bundle: everything (pipeline, job, code) is deployed from Git
+# with `databricks bundle deploy -t <target>` - no manual clicking in the UI.
+bundle:
+  name: food-delivery-lakehouse
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog catalog that holds the landing/bronze/silver/gold schemas
+    default: workspace
+
+targets:
+  dev:
+    mode: development       # prefixes resources with [dev <user>] and pauses schedules
+    default: true
+    # host comes from DATABRICKS_HOST / ~/.databrickscfg
+
+  prod:
+    mode: production
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: prod

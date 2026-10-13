@@ -1,0 +1,20 @@
+resources:
+  pipelines:
+    food_delivery_pipeline:
+      name: food-delivery-medallion
+      catalog: ${var.catalog}
+      schema: bronze            # default schema; tables are published to bronze/silver/gold by full name
+      serverless: true
+      channel: CURRENT
+      continuous: false         # triggered by the job; set true for always-on streaming
+      libraries:
+        - file:
+            path: ../pipelines/bronze.py
+        - file:
+            path: ../pipelines/silver.py
+        - file:
+            path: ../pipelines/gold.py
+      configuration:
+        fd.catalog: ${var.catalog}
+        fd.landing_path: /Volumes/${var.catalog}/landing/raw
+        bundle.sourcePath: ${workspace.file_path}/src

@@ -1,0 +1,66 @@
+resources:
+  jobs:
+    food_delivery_job:
+      name: food-delivery-lakehouse-orchestration
+      description: >
+        Setup -> land new source files -> Lakeflow pipeline (bronze/silver/gold)
+        -> streaming zone demand/supply -> data quality report.
+
+      schedule:
+        quartz_cron_expression: "0 0 * * * ?"   # hourly
+        timezone_id: Asia/Kolkata
+        pause_status: PAUSED                     # unpause in prod when ready
+
+      max_concurrent_runs: 1
+      timeout_seconds: 3600
+
+      # email_notifications:
+      #   on_failure: [you@example.com]
+
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: batches
+          default: "4"
+
+      tasks:
+        - task_key: setup_unity_catalog
+          notebook_task:
+            notebook_path: ../notebooks/00_setup_unity_catalog.sql
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+
+        - task_key: generate_source_events
+          depends_on:
+            - task_key: setup_unity_catalog
+          notebook_task:
+            notebook_path: ../notebooks/01_generate_events.py
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              batches: "{{job.parameters.batches}}"
+
+        - task_key: medallion_pipeline
+          depends_on:
+            - task_key: generate_source_events
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.food_delivery_pipeline.id}
+            full_refresh: false
+
+        - task_key: zone_demand_streaming
+          depends_on:
+            - task_key: medallion_pipeline
+          max_retries: 2
+          min_retry_interval_millis: 60000
+          notebook_task:
+            notebook_path: ../notebooks/02_zone_demand_streaming.py
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+
+        - task_key: data_quality_report
+          depends_on:
+            - task_key: medallion_pipeline
+          notebook_task:
+            notebook_path: ../notebooks/03_data_quality_report.py
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              pipeline_id: ${resources.pipelines.food_delivery_pipeline.id}
