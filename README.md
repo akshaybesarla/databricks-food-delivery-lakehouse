@@ -15,53 +15,106 @@ It answers the questions an operations team at a delivery company asks every day
 ## Architecture
 
 ```mermaid
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Segoe UI, Helvetica, Arial", "fontSize": "15px", "lineColor": "#5B6B7F"}}}%%
 flowchart LR
-    subgraph Sources["Source systems (simulated)"]
-        OS[Order service<br/>status events - CDC]
-        RA[Rider app<br/>GPS pings]
-        RP[Restaurant portal<br/>master data]
+    subgraph SRC["📱 SOURCE SYSTEMS"]
+        direction TB
+        OS["🛵 Order Service<br/><i>status events · CDC</i>"]
+        RA["📍 Rider App<br/><i>GPS pings</i>"]
+        RP["🍽️ Restaurant Portal<br/><i>master data</i>"]
     end
 
-    subgraph UC["Unity Catalog"]
-        V[(landing.raw<br/>Volume - JSON)]
+    V[("📂 Landing Volume<br/><i>landing.raw · JSON</i>")]
 
-        subgraph LDP["Lakeflow Declarative Pipeline (serverless)"]
-            B1[bronze.order_events_raw]
-            B2[bronze.rider_pings_raw]
-            B3[bronze.restaurants_raw]
-            S1[silver.order_events<br/>expectations + dedup]
-            SQ[silver.order_events_quarantine]
-            S2[silver.orders_current<br/>AUTO CDC - SCD1]
-            S3[silver.rider_pings]
-            S4[silver.dim_restaurant<br/>AUTO CDC - SCD2]
-            G1[gold.fact_order_lifecycle]
-            G2[gold.kpi_city_daily]
-            G3[gold.restaurant_performance]
-        end
-
-        ST[Structured Streaming<br/>5-min windows + watermark<br/>foreachBatch MERGE]
-        G4[gold.zone_demand_supply_5m]
-        G5[gold.rider_latest_location]
-        DQ[gold.dq_expectation_results]
+    subgraph BRONZE["🥉 BRONZE · raw, append-only"]
+        direction TB
+        B1["order_events_raw"]
+        B2["rider_pings_raw"]
+        B3["restaurants_raw"]
     end
+
+    subgraph SILVER["🥈 SILVER · clean & validated"]
+        direction TB
+        S1["order_events<br/><i>expectations + dedup</i>"]
+        SQ["⚠️ order_events_quarantine"]
+        S2["orders_current<br/><i>AUTO CDC · SCD1</i>"]
+        S3["rider_pings"]
+        S4["dim_restaurant<br/><i>AUTO CDC · SCD2</i>"]
+    end
+
+    subgraph GOLD["🥇 GOLD · business-ready"]
+        direction TB
+        G1["fact_order_lifecycle"]
+        G2["kpi_city_daily"]
+        G3["restaurant_performance"]
+        G4["zone_demand_supply_5m"]
+        G5["rider_latest_location"]
+        DQ["dq_expectation_results"]
+    end
+
+    ST{{"⚡ Structured Streaming<br/><i>5-min windows · watermark<br/>foreachBatch MERGE</i>"}}
+    BI["📊 Databricks SQL<br/>AI/BI Dashboard"]
 
     OS & RA & RP --> V
-    V -- Auto Loader --> B1 & B2 & B3
-    B1 --> S1 & SQ
+    V == "Auto Loader" ==> B1 & B2 & B3
+    B1 --> S1
+    B1 -. "failed rules" .-> SQ
     S1 --> S2
     B2 --> S3
     B3 --> S4
-    S1 & S4 --> G1 --> G2 & G3
-    S1 & S3 --> ST --> G4 & G5
-    LDP -. event log .-> DQ
-    G2 & G3 & G4 --> BI[Databricks SQL<br/>AI/BI dashboard]
+    S1 & S4 --> G1
+    G1 --> G2 & G3
+    S1 & S3 --> ST
+    ST --> G4 & G5
+    SILVER -. "pipeline event log" .-> DQ
+    G2 & G3 & G4 ==> BI
+
+    classDef src fill:#EDE7FF,stroke:#7C4DFF,stroke-width:2px,color:#2D1B69
+    classDef land fill:#E0F7FA,stroke:#00838F,stroke-width:2px,color:#004D55
+    classDef bronze fill:#F9E0C7,stroke:#B26A2B,stroke-width:2px,color:#5A2E0A
+    classDef silver fill:#ECEFF4,stroke:#7B8794,stroke-width:2px,color:#2B333B
+    classDef gold fill:#FFF3C4,stroke:#D4A017,stroke-width:2px,color:#5C4300
+    classDef warn fill:#FFE0E0,stroke:#D32F2F,stroke-width:2px,color:#7F1010
+    classDef stream fill:#DCEBFF,stroke:#1E63C6,stroke-width:2px,color:#0B2E66
+    classDef bi fill:#DFF5E3,stroke:#2E8B57,stroke-width:2px,color:#123D22
+
+    class OS,RA,RP src
+    class V land
+    class B1,B2,B3 bronze
+    class S1,S2,S3,S4 silver
+    class SQ warn
+    class G1,G2,G3,G4,G5,DQ gold
+    class ST stream
+    class BI bi
+
+    style SRC fill:#F7F4FF,stroke:#7C4DFF,stroke-width:2px,color:#2D1B69
+    style BRONZE fill:#FDF3EA,stroke:#B26A2B,stroke-width:2px,color:#5A2E0A
+    style SILVER fill:#F7F8FA,stroke:#7B8794,stroke-width:2px,color:#2B333B
+    style GOLD fill:#FFFBEA,stroke:#D4A017,stroke-width:2px,color:#5C4300
 ```
 
-Orchestration (Lakeflow Jobs, defined in `resources/food_delivery.job.yml`):
+### Orchestration · Lakeflow Jobs
 
-```
-setup_unity_catalog -> generate_source_events -> medallion_pipeline -+-> zone_demand_streaming
-                                                                     +-> data_quality_report
+Defined as code in `resources/food_delivery.job.yml`, runs hourly (IST) on serverless compute.
+
+```mermaid
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Segoe UI, Helvetica, Arial", "fontSize": "15px", "lineColor": "#5B6B7F"}}}%%
+flowchart LR
+    T1["🏗️ setup_unity_catalog"] --> T2["🎲 generate_source_events"]
+    T2 --> T3["🔄 medallion_pipeline<br/><i>Lakeflow Declarative Pipeline</i>"]
+    T3 --> T4["⚡ zone_demand_streaming"]
+    T3 --> T5["✅ data_quality_report"]
+
+    classDef setup fill:#EDE7FF,stroke:#7C4DFF,stroke-width:2px,color:#2D1B69
+    classDef gen fill:#E0F7FA,stroke:#00838F,stroke-width:2px,color:#004D55
+    classDef pipe fill:#FFE3D6,stroke:#FF3621,stroke-width:2px,color:#7A1500
+    classDef stream fill:#DCEBFF,stroke:#1E63C6,stroke-width:2px,color:#0B2E66
+    classDef dq fill:#DFF5E3,stroke:#2E8B57,stroke-width:2px,color:#123D22
+    class T1 setup
+    class T2 gen
+    class T3 pipe
+    class T4 stream
+    class T5 dq
 ```
 
 ## What makes the data realistic
